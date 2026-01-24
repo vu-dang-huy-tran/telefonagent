@@ -12,6 +12,11 @@ const App: React.FC = () => {
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | null>(null);
   const [collectedData, setCollectedData] = useState<SickNote | null>(null);
   const [route, setRoute] = useState<string>(() => window.location.hash || '#/');
+  const [isAuthed, setIsAuthed] = useState<boolean>(() => {
+    return document.cookie.split('; ').some(c => c.startsWith('app_pw=qw123'));
+  });
+  const [pwInput, setPwInput] = useState('');
+  const [pwError, setPwError] = useState<string | null>(null);
   
   const liveServiceRef = useRef<GeminiLiveService | null>(null);
 
@@ -20,6 +25,17 @@ const App: React.FC = () => {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+
+  const handlePwSubmit = () => {
+    if (pwInput === 'qw123') {
+      document.cookie = 'app_pw=qw123; Path=/; Max-Age=2592000; SameSite=Lax';
+      setIsAuthed(true);
+      setPwInput('');
+      setPwError(null);
+    } else {
+      setPwError('Falsches Passwort.');
+    }
+  };
 
   const handleStartCall = async () => {
     setCallState(CallState.CONNECTING);
@@ -101,6 +117,33 @@ const App: React.FC = () => {
     setCallState(CallState.ENDED);
     setTimeout(() => setCallState(CallState.IDLE), 1000);
   };
+
+  if (!isAuthed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <div className="w-full max-w-md bg-white/5 backdrop-blur-md rounded-2xl p-8 shadow-2xl border border-white/10">
+          <h2 className="text-2xl font-bold mb-6 text-white text-center">Zugriff geschützt</h2>
+          <div className="space-y-4">
+            <label className="block text-sm font-medium text-gray-300">Passwort</label>
+            <input
+              type="password"
+              value={pwInput}
+              onChange={(e) => setPwInput(e.target.value)}
+              className="w-full px-4 py-3 bg-black/40 border border-gray-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+              placeholder="Passwort eingeben"
+            />
+            {pwError && <div className="text-sm text-red-400">{pwError}</div>}
+            <button
+              onClick={handlePwSubmit}
+              className="w-full py-3 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition"
+            >
+              Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (route === '#/admin') {
     return <AdminDashboard />;
