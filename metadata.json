@@ -1,0 +1,7 @@
+{
+  "name": "Schulsekretariat AI",
+  "description": "Ein KI-gestützter Telefonagent, der die Rolle des Schulsekretariats übernimmt, um Krankmeldungen entgegenzunehmen.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
