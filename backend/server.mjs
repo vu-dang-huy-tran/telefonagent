@@ -309,6 +309,36 @@ wss.on('connection', (ws) => {
   let sessionPromise = null;
   let ai = null;
   let isConnected = false;
+  let idleTimer = null;
+  const IDLE_TIMEOUT_MS = Number(process.env.GEMINI_IDLE_TIMEOUT_MS || 120000);
+
+  const clearIdleTimer = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  };
+
+  const closeGeminiSession = (reason) => {
+    wsDebug('Closing Gemini session', { reason });
+    if (sessionPromise) {
+      sessionPromise?.then(session => {
+        try {
+          session.sendRealtimeInput({ audioStreamEnd: true });
+          session.conn?.close();
+        } catch (e) {}
+      });
+    }
+  };
+
+  const resetIdleTimer = () => {
+    clearIdleTimer();
+    if (IDLE_TIMEOUT_MS > 0) {
+      idleTimer = setTimeout(() => {
+        closeGeminiSession('idle_timeout');
+      }, IDLE_TIMEOUT_MS);
+    }
+  };
 
   const send = (payload) => {
     if (ws.readyState === ws.OPEN) {
@@ -318,6 +348,7 @@ wss.on('connection', (ws) => {
   };
 
   const handleMessage = async (message) => {
+    resetIdleTimer();
     wsDebug('Gemini message', {
       hasToolCall: Boolean(message.toolCall),
       hasServerContent: Boolean(message.serverContent)
@@ -419,6 +450,7 @@ wss.on('connection', (ws) => {
 
     wsDebug('Message', { type: msg.type });
     if (msg.type === 'start') {
+      resetIdleTimer();
       if (!API_KEY) {
         wsDebug('Start blocked: missing API key');
         send({ type: 'error', message: 'GEMINI_API_KEY missing on server' });
@@ -512,6 +544,7 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'audio') {
       if (!sessionPromise) return;
+      resetIdleTimer();
       wsDebug('Audio input', { mimeType: msg.mimeType, bytes: msg.data?.length });
       const data = msg.data;
       const mimeType = msg.mimeType || 'audio/pcm;rate=16000';
@@ -524,6 +557,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'stop') {
       if (!sessionPromise) return;
       wsDebug('Stop');
+      clearIdleTimer();
       sessionPromise?.then(session => {
         try {
           session.sendRealtimeInput({ audioStreamEnd: true });
@@ -536,6 +570,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     wsDebug('Connection closed');
+    clearIdleTimer();
     if (sessionPromise) {
       sessionPromise?.then(session => {
         try { session.conn?.close(); } catch (e) {}
