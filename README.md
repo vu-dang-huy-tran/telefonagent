@@ -15,8 +15,8 @@ View your app in AI Studio: https://ai.studio/apps/drive/1GSKJOdaa1Db_E0iddfxgMy
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Start the backend (WebSocket on port 3001):
+2. Set the `VITE_GEMINI_API_KEY` in your frontend env (e.g. `.env.local`) to your Gemini API key
+3. (Optional) Start the backend for admin/data APIs on port 3001:
    `npm run dev:server`
 4. Start the frontend:
    `npm run dev`

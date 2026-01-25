@@ -1,5 +1,6 @@
 import { createPCM16Blob, base64ToUint8Array, decodeAudioData, downsampleBuffer } from '../utils/audioUtils';
 import { SickNote } from '../types';
+import { GoogleGenAI, Modality, Type } from '@google/genai';
 
 interface LiveServiceCallbacks {
   onOpen: () => void;
@@ -20,15 +21,43 @@ export class GeminiLiveService {
   private nextStartTime = 0;
   private activeSources = new Set<AudioBufferSourceNode>();
   private stream: MediaStream | null = null;
-  private ws: WebSocket | null = null;
+  private sessionPromise: Promise<any> | null = null;
   private isConnected = false;
-  private backendUrl: string;
+  private backendHttpUrl: string;
+
+  private sickNoteTool = {
+    name: 'submitSickNote',
+    description: 'Speichert die Krankmeldung eines Schülers ab, sobald alle notwendigen Daten (Stadt, Schule, Name, Geburtstag, Datum) erfasst wurden.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        city: {
+          type: Type.STRING,
+          description: 'Die Stadt, in der sich die Schule befindet.'
+        },
+        schoolName: {
+          type: Type.STRING,
+          description: 'Der Name der Schule des Kindes.'
+        },
+        childName: {
+          type: Type.STRING,
+          description: 'Der vollständige Vor- und Nachname des Kindes.'
+        },
+        dateOfBirth: {
+          type: Type.STRING,
+          description: 'Das Geburtsdatum des Kindes (z.B. 12.05.2015).'
+        },
+        sickUntil: {
+          type: Type.STRING,
+          description: 'Das Datum, bis zu dem das Kind voraussichtlich krankgeschrieben ist.'
+        }
+      },
+      required: ['city', 'schoolName', 'childName', 'dateOfBirth', 'sickUntil']
+    }
+  };
 
   constructor() {
-    const envUrl = (import.meta as any).env?.VITE_BACKEND_WS_URL;
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const fallback = `${protocol}://${window.location.host}`;
-    this.backendUrl = envUrl || fallback;
+    this.backendHttpUrl = (import.meta as any).env?.VITE_BACKEND_HTTP_URL || `${window.location.protocol}//${window.location.host}`;
   }
 
   public async connect(
@@ -58,91 +87,141 @@ export class GeminiLiveService {
         throw new Error("Microphone access denied. Please allow microphone access.");
       }
       
-      this.ws = new WebSocket(this.backendUrl);
+      const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('VITE_GEMINI_API_KEY is missing.');
+      }
 
-      this.ws.onopen = () => {
-        const payload: any = { type: 'start' };
-        if (config) {
-          payload.config = config;
-        }
-        this.ws?.send(JSON.stringify(payload));
-      };
+      const ai = new GoogleGenAI({ apiKey });
 
-      this.ws.onmessage = async (event) => {
-        let msg: any = null;
-        try {
-          msg = JSON.parse(event.data);
-        } catch (e) {
-          return;
-        }
+      this.sessionPromise = ai.live.connect({
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+        callbacks: {
+          onopen: () => {
+            this.isConnected = true;
+            this.setupAudioInput();
+            callbacks.onOpen();
 
-        if (msg.type === 'open') {
-          this.isConnected = true;
-          this.setupAudioInput();
-          callbacks.onOpen();
-          return;
-        }
-
-        if (msg.type === 'close') {
-          this.isConnected = false;
-          callbacks.onClose();
-          return;
-        }
-
-        if (msg.type === 'error') {
-          callbacks.onError(new Error(msg.message || 'Connection error'));
-          return;
-        }
-
-        if (msg.type === 'transcription') {
-          callbacks.onTranscription(msg.text, msg.isUser);
-          return;
-        }
-
-        if (msg.type === 'sickNote') {
-          callbacks.onSickNoteCollected(msg.data);
-          return;
-        }
-
-        if (msg.type === 'audio') {
-          const base64Audio = msg.data;
-          if (base64Audio && this.audioContext && this.outputNode) {
-            try {
-              const audioBuffer = await decodeAudioData(
-                base64ToUint8Array(base64Audio),
-                this.audioContext,
-                24000,
-                1
-              );
-
-              this.nextStartTime = Math.max(this.nextStartTime, this.audioContext.currentTime);
-
-              const source = this.audioContext.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(this.outputNode);
-
-              source.addEventListener('ended', () => {
-                this.activeSources.delete(source);
+            this.sessionPromise?.then(session => {
+              session.sendClientContent({
+                turns: [{
+                  role: 'user',
+                  parts: [{ text: 'Anruf entgegennehmen.' }]
+                }],
+                turnComplete: true
               });
+            });
+          },
+          onmessage: async (message: any) => {
+            if (message.toolCall) {
+              for (const fc of message.toolCall.functionCalls || []) {
+                if (fc.name === 'submitSickNote') {
+                  const data = { ...(fc.args || {}), status: 'collected' } as SickNote;
+                  try {
+                    await fetch(`${this.backendHttpUrl}/api/sick-notes`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(data)
+                    });
+                  } catch (e) {}
+                  callbacks.onSickNoteCollected(data);
 
-              source.start(this.nextStartTime);
-              this.nextStartTime += audioBuffer.duration;
-              this.activeSources.add(source);
-            } catch (err) {
-              console.error('Error decoding audio:', err);
+                  this.sessionPromise?.then(session => {
+                    session.sendToolResponse({
+                      functionResponses: [{
+                        id: fc.id,
+                        name: fc.name,
+                        response: { result: 'success', message: 'Krankmeldung wurde erfolgreich übernommen.' }
+                      }]
+                    });
+                  });
+                }
+              }
             }
+
+            if (message.serverContent?.outputTranscription?.text) {
+              callbacks.onTranscription(message.serverContent.outputTranscription.text, false);
+            }
+            if (message.serverContent?.inputTranscription?.text) {
+              callbacks.onTranscription(message.serverContent.inputTranscription.text, true);
+            }
+
+            const parts = message.serverContent?.modelTurn?.parts || [];
+            for (const part of parts) {
+              const data = part?.inlineData?.data;
+              const mimeType = part?.inlineData?.mimeType;
+              if (data && mimeType?.startsWith('audio/')) {
+                if (this.audioContext && this.outputNode) {
+                  try {
+                    const audioBuffer = await decodeAudioData(
+                      base64ToUint8Array(data),
+                      this.audioContext,
+                      24000,
+                      1
+                    );
+
+                    this.nextStartTime = Math.max(this.nextStartTime, this.audioContext.currentTime);
+
+                    const source = this.audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(this.outputNode);
+
+                    source.addEventListener('ended', () => {
+                      this.activeSources.delete(source);
+                    });
+
+                    source.start(this.nextStartTime);
+                    this.nextStartTime += audioBuffer.duration;
+                    this.activeSources.add(source);
+                  } catch (err) {
+                    console.error('Error decoding audio:', err);
+                  }
+                }
+              }
+            }
+          },
+          onclose: () => {
+            this.isConnected = false;
+            callbacks.onClose();
+          },
+          onerror: (e: any) => {
+            callbacks.onError(e instanceof Error ? e : new Error('Connection error'));
           }
+        },
+        config: {
+          responseModalities: [Modality.AUDIO],
+          systemInstruction: `
+            Du bist ein effizientes KI-Sekretariat für Krankmeldungen.
+            
+            Szenario: Das Telefon klingelt. Du nimmst ab.
+            
+            REGEL NR 1: DU BEGINNST DAS GESPRÄCH.
+            Sobald du die Nachricht "Anruf entgegennehmen." erhältst (das ist dein Startsignal), sprich SOFORT los.
+            Begrüßung: "Guten Tag, hier ist das KI-Sekretariat. Möchten Sie eine Krankmeldung für Ihr Kind abgeben, dann nennen Sie mir bitte die Stadt und die Schule."
+            
+            SPRACH-LOGIK:
+            - Starte immer auf Deutsch.
+            - Wenn der Anrufer eine andere Sprache spricht (z.B. Englisch, Türkisch, Arabisch, etc.), wechsle SOFORT in diese Sprache.
+            
+            ZIEL DES GESPRÄCHS:
+            Sammle folgende Daten für eine Krankmeldung:
+            1. Stadt.
+            2. Schule.
+            3. Vollständiger Name des Kindes.
+            4. Geburtsdatum des Kindes.
+            5. Dauer der Krankheit (bis wann).
+            
+            Sobald du diese 5 Infos hast, rufe die Funktion 'submitSickNote' auf.
+            Bestätige danach dem Anrufer kurz den Erfolg und beende das Gespräch.
+          `,
+          tools: [{ functionDeclarations: [this.sickNoteTool] }],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
+          },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {}
         }
-      };
-
-      this.ws.onclose = () => {
-        this.isConnected = false;
-        callbacks.onClose();
-      };
-
-      this.ws.onerror = () => {
-        callbacks.onError(new Error('WebSocket error'));
-      };
+      });
 
     } catch (error) {
       console.error("Failed to connect:", error);
@@ -152,7 +231,7 @@ export class GeminiLiveService {
   }
 
   private setupAudioInput() {
-    if (!this.audioContext || !this.stream || !this.ws) return;
+    if (!this.audioContext || !this.stream || !this.sessionPromise) return;
 
     this.inputSource = this.audioContext.createMediaStreamSource(this.stream);
     this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
@@ -168,13 +247,14 @@ export class GeminiLiveService {
 
       const pcmBlob = createPCM16Blob(downsampledData);
       
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({
-          type: 'audio',
-          data: pcmBlob.data,
-          mimeType: pcmBlob.mimeType
-        }));
-      }
+      this.sessionPromise?.then(session => {
+        session.sendRealtimeInput({
+          audio: {
+            data: pcmBlob.data,
+            mimeType: pcmBlob.mimeType
+          }
+        });
+      });
     };
 
     this.muteNode = this.audioContext.createGain();
@@ -215,14 +295,14 @@ export class GeminiLiveService {
       this.audioContext = null;
     }
 
-    if (this.ws) {
-      try {
-        if (this.ws.readyState === WebSocket.OPEN) {
-          this.ws.send(JSON.stringify({ type: 'stop' }));
-        }
-        this.ws.close();
-      } catch (e) {}
-      this.ws = null;
+    if (this.sessionPromise) {
+      this.sessionPromise?.then(session => {
+        try {
+          session.sendRealtimeInput({ audioStreamEnd: true });
+          session.conn?.close();
+        } catch (e) {}
+      });
+      this.sessionPromise = null;
     }
   }
 }
