@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
       preview: {
         host: '0.0.0.0',
         allowedHosts: [
-          'it-service-agent-vertexai-676916222092.europe-west1.run.app'
+          'telefonagent-439449011378.europe-west1.run.app'
         ]
       },
       plugins: [react()],
