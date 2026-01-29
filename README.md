@@ -2,21 +2,59 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# UKK IT‑Service Telefonagent
 
-This contains everything you need to run your app locally.
+Frontend (Vite/React) + Backend (WebSocket‑Proxy zu Gemini Live) in einem Projekt.
 
-View your app in AI Studio: https://ai.studio/apps/drive/1GSKJOdaa1Db_E0iddfxgMydWOF3v1RD1
+## Voraussetzungen
 
-## Run Locally
+- Node.js 20+
+- Gemini API Key (oder Vertex AI Setup)
 
-**Prerequisites:**  Node.js
+## Lokaler Start (Frontend + Backend)
 
+1. Abhängigkeiten installieren:
+   ```bash
+   npm install
+   ```
+2. Umgebungsvariable setzen:
+   ```bash
+   export GEMINI_API_KEY="<dein_key>"
+   ```
+   Unter Windows (PowerShell):
+   ```powershell
+   $env:GEMINI_API_KEY="<dein_key>"
+   ```
+3. Beide Services starten:
+   ```bash
+   npm run dev:all
+   ```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `VITE_GEMINI_API_KEY` in your frontend env (e.g. `.env.local`) to your Gemini API key
-3. (Optional) Start the backend for admin/data APIs on port 3001:
-   `npm run dev:server`
-4. Start the frontend:
-   `npm run dev`
+Frontend: http://localhost:3000
+Backend WebSocket: ws://localhost:3001/ws
+
+## Wichtige Variablen
+
+- `GEMINI_API_KEY`: API‑Key für Gemini Live
+- `PORT`: Port für Backend (Default: 3001)
+- `VOICE_WS_PATH`: WebSocket Pfad (Default: /ws)
+- `DEBUG_WS`: Debug‑Logs (Default: true)
+
+## Architektur
+
+- Frontend sendet PCM‑Audio (16 kHz) via WebSocket an das Backend.
+- Backend öffnet eine Gemini Live Session und streamt Audio/Tools zurück.
+
+## Docker / Cloud Run
+
+Build:
+```bash
+docker build -t it-service-agent .
+```
+
+Run lokal:
+```bash
+docker run -p 8080:8080 -e GEMINI_API_KEY="<dein_key>" it-service-agent
+```
+
+Cloud Run nutzt Port `8080` automatisch. Frontend & Backend laufen gemeinsam in einem Container.

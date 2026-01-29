@@ -1,23 +1,17 @@
-export enum CallState {
-  IDLE = 'IDLE',
-  CONNECTING = 'CONNECTING',
-  ACTIVE = 'ACTIVE',
-  ENDED = 'ENDED',
-  ERROR = 'ERROR'
+
+export interface Krankmeldung {
+  id: string;
+  schulName: string;
+  schulStadt: string;
+  kindName: string;
+  geburtsdatum: string;
+  dauer: string;
+  createdAt: Date;
+  status: 'Neu' | 'Bestätigt' | 'Archiviert';
 }
 
-export interface LogEntry {
-  source: 'user' | 'bot' | 'system';
-  message: string;
-  timestamp: Date;
-}
-
-export interface SickNote {
-  schoolId: string;
-  city: string;
-  schoolName: string;
-  childName: string;
-  dateOfBirth: string;
-  sickUntil: string;
-  status: 'collected' | 'school_notified';
+export interface AgentStatus {
+  isActive: boolean;
+  isConnecting: boolean;
+  lastError: string | null;
 }

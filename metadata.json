@@ -1,6 +1,6 @@
 {
-  "name": "Schulsekretariat AI",
-  "description": "Ein KI-gestützter Telefonagent, der die Rolle des Schulsekretariats übernimmt, um Krankmeldungen entgegenzunehmen.",
+  "name": "UKK IT-Service Telefonagent",
+  "description": "Ein intelligenter KI-Telefonagent für die IT-Abteilung der Uniklinik Köln zur strukturierten Aufnahme von Support-Anfragen.",
   "requestFramePermissions": [
     "microphone"
   ]

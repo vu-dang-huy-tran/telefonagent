@@ -1,190 +1,116 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { CallState, LogEntry, SickNote } from './types';
-import { GeminiLiveService } from './services/geminiLiveService';
-import { SettingsPanel } from './components/SettingsPanel';
-import { CallInterface } from './components/CallInterface';
-import { AdminDashboard } from './components/AdminDashboard';
-import { Phone, Database } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { Krankmeldung } from './types';
+import VoiceAgent from './components/VoiceAgent';
+import KrankmeldungsListe from './components/KrankmeldungsListe';
 
 const App: React.FC = () => {
-  const [callState, setCallState] = useState<CallState>(CallState.IDLE);
-  const [transcripts, setTranscripts] = useState<LogEntry[]>([]);
-  const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | null>(null);
-  const [collectedData, setCollectedData] = useState<SickNote | null>(null);
-  const [route, setRoute] = useState<string>(() => window.location.hash || '#/');
-  const [isAuthed, setIsAuthed] = useState<boolean>(() => {
-    return document.cookie.split('; ').some(c => c.startsWith('app_pw=qw123'));
-  });
-  const [pwInput, setPwInput] = useState('');
-  const [pwError, setPwError] = useState<string | null>(null);
-  
-  const liveServiceRef = useRef<GeminiLiveService | null>(null);
+  const [krankmeldungen, setKrankmeldungen] = useState<Krankmeldung[]>([]);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [password, setPassword] = useState('');
+  const [showError, setShowError] = useState(false);
 
-  useEffect(() => {
-    const onHashChange = () => setRoute(window.location.hash || '#/');
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password === 'qw123') {
+      setIsAuthenticated(true);
+      setShowError(false);
+    } else {
+      setShowError(true);
+      setPassword('');
+    }
+  };
+
+  const handleKrankmeldungSubmit = useCallback((meldungData: Partial<Krankmeldung>) => {
+    console.log('📋 handleKrankmeldungSubmit aufgerufen mit Daten:', meldungData);
+    const neueMeldung: Krankmeldung = {
+      id: Math.random().toString(36).substr(2, 9),
+      schulName: meldungData.schulName || 'Unbekannt',
+      schulStadt: meldungData.schulStadt || 'N/A',
+      kindName: meldungData.kindName || 'Unbekannt',
+      geburtsdatum: meldungData.geburtsdatum || 'N/A',
+      dauer: meldungData.dauer || 'Unklar',
+      createdAt: new Date(),
+      status: 'Neu'
+    };
+
+    console.log('➕ Neue Meldung erstellt:', neueMeldung);
+    setKrankmeldungen(prev => [neueMeldung, ...prev]);
+    console.log('✅ Krankmeldung zur Liste hinzugefügt');
   }, []);
 
-  const handlePwSubmit = () => {
-    if (pwInput === 'qw123') {
-      document.cookie = 'app_pw=qw123; Path=/; Max-Age=2592000; SameSite=Lax';
-      setIsAuthed(true);
-      setPwInput('');
-      setPwError(null);
-    } else {
-      setPwError('Falsches Passwort.');
-    }
-  };
+  const handleUpdateStatus = useCallback((id: string, status: Krankmeldung['status']) => {
+    setKrankmeldungen(prev => prev.map(m => m.id === id ? { ...m, status } : m));
+  }, []);
 
-  const handleStartCall = async () => {
-    setCallState(CallState.CONNECTING);
-    setTranscripts([]);
-    setCollectedData(null); // Reset data
-
-    const service = new GeminiLiveService();
-    liveServiceRef.current = service;
-
-    try {
-      await service.connect(undefined, {
-        onOpen: () => {
-          setCallState(CallState.ACTIVE);
-        },
-        onClose: () => {
-          setCallState(CallState.ENDED);
-          setAudioAnalyser(null);
-          setTimeout(() => setCallState(CallState.IDLE), 3000);
-        },
-        onError: (err) => {
-          console.error(err);
-          setCallState(CallState.ERROR);
-          setTranscripts(prev => [...prev, {
-            source: 'system',
-            message: 'Verbindungsfehler aufgetreten.',
-            timestamp: new Date()
-          }]);
-          setTimeout(() => setCallState(CallState.IDLE), 3000);
-        },
-        onAudioData: (analyser) => {
-          setAudioAnalyser(analyser);
-        },
-        onTranscription: (text, isUser) => {
-          setTranscripts(prev => {
-            const source = isUser ? 'user' : 'bot';
-            if (prev.length > 0 && prev[prev.length - 1].source === source) {
-              const last = prev[prev.length - 1];
-              const nextMessage = text.startsWith(last.message)
-                ? text
-                : `${last.message} ${text}`.trim();
-
-              return [
-                ...prev.slice(0, -1),
-                {
-                  ...last,
-                  message: nextMessage,
-                  timestamp: new Date()
-                }
-              ];
-            }
-
-            return [...prev, {
-              source,
-              message: text,
-              timestamp: new Date()
-            }];
-          });
-        },
-        onSickNoteCollected: (data) => {
-            setCollectedData(data);
-            setTranscripts(prev => [...prev, {
-                source: 'system',
-                message: '✅ DATENSATZ VOLLSTÄNDIG - GESPEICHERT',
-                timestamp: new Date()
-            }]);
-        }
-      });
-    } catch (e) {
-      console.error(e);
-      setCallState(CallState.ERROR);
-    }
-  };
-
-  const handleEndCall = async () => {
-    if (liveServiceRef.current) {
-      await liveServiceRef.current.disconnect();
-      liveServiceRef.current = null;
-    }
-    setCallState(CallState.ENDED);
-    setTimeout(() => setCallState(CallState.IDLE), 1000);
-  };
-
-  if (!isAuthed) {
+  if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        <div className="w-full max-w-md bg-white/5 backdrop-blur-md rounded-2xl p-8 shadow-2xl border border-white/10">
-          <h2 className="text-2xl font-bold mb-6 text-white text-center">Zugriff geschützt</h2>
-          <div className="space-y-4">
-            <label className="block text-sm font-medium text-gray-300">Passwort</label>
-            <input
-              type="password"
-              value={pwInput}
-              onChange={(e) => setPwInput(e.target.value)}
-              className="w-full px-4 py-3 bg-black/40 border border-gray-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
-              placeholder="Passwort eingeben"
-            />
-            {pwError && <div className="text-sm text-red-400">{pwError}</div>}
-            <button
-              onClick={handlePwSubmit}
-              className="w-full py-3 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition"
-            >
-              Login
-            </button>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md border border-slate-200">
+          <div className="text-center mb-8">
+            <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg mx-auto mb-4">
+              <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">Anmelden</h2>
+            <p className="text-slate-500 text-sm">Krankmeldungs-System</p>
           </div>
+          
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-2">
+                Passwort
+              </label>
+              <input
+                type="password"
+                id="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                placeholder="Passwort eingeben"
+                autoFocus
+              />
+            </div>
+            
+            {showError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                Falsches Passwort. Bitte versuchen Sie es erneut.
+              </div>
+            )}
+            
+            <button
+              type="submit"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-all transform active:scale-95 shadow-lg"
+            >
+              Anmelden
+            </button>
+          </form>
         </div>
       </div>
     );
   }
 
-  if (route === '#/admin') {
-    return <AdminDashboard />;
-  }
-
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      
-      {callState === CallState.IDLE || callState === CallState.ERROR ? (
-        <div className="w-full max-w-5xl flex flex-col md:flex-row items-center gap-12">
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
-          <div className="flex-1 text-center md:text-left space-y-6">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-emerald-600 shadow-lg shadow-emerald-500/30 mb-4">
-              <Database size={40} className="text-white" />
-            </div>
-            <h1 className="text-5xl font-extrabold text-white tracking-tight leading-tight">
-              Krankmeldung <span className="text-emerald-400">Assistant</span>
-            </h1>
-            <p className="text-xl text-gray-300 max-w-lg leading-relaxed">
-              Automatisierte telefonische Datenerfassung für Schulen. 
-              <br/><br/>
-              Dieser Agent nimmt Anrufe entgegen, extrahiert <strong>Name</strong>, <strong>Geburtsdatum</strong> und <strong>Dauer</strong> der Krankheit und speichert diese strukturiert ab.
-            </p>
+          {/* Left Column: Voice Agent Controller */}
+          <div className="lg:col-span-4 space-y-6">
+            <VoiceAgent onKrankmeldungSubmit={handleKrankmeldungSubmit} />
           </div>
 
-          <div className="flex-1 w-full flex justify-center">
-            <SettingsPanel 
-              onStart={handleStartCall}
-              disabled={callState === CallState.ERROR}
-            />
+          {/* Right Column: Krankmeldungsliste */}
+          <div className="lg:col-span-8">
+            <KrankmeldungsListe krankmeldungen={krankmeldungen} onUpdateStatus={handleUpdateStatus} />
           </div>
         </div>
-      ) : (
-        <CallInterface 
-          callState={callState}
-          onEndCall={handleEndCall}
-          audioAnalyser={audioAnalyser}
-          transcripts={transcripts}
-          collectedData={collectedData}
-        />
-      )}
+      </main>
+
+      {/* Footer */}
+      <footer className="mt-auto py-8 text-center text-slate-400 text-sm border-t border-slate-200 bg-white">
+        &copy; 2026 Schulsekretariat - Krankmeldungs-System (Demo)
+      </footer>
     </div>
   );
 };
