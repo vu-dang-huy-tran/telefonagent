@@ -79,7 +79,7 @@ wss.on('connection', (ws) => {
         });
 
         const ai = new GoogleGenAI({
-          apiKey: "AIzaSyAqxjPVyvO-qt7fBmR--JzhNU4iTnrMB3o"
+          apiKey: "AIzaSyB3w4wSnD2M7U-W7J7rrGyrWoHlt8fKrbM"
         });
 
       sessionPromise = ai.live.connect({
@@ -195,3 +195,4 @@ wss.on('connection', (ws) => {
 server.listen(PORT, () => {
   console.log(`Voice backend listening on http://localhost:${PORT}${WS_PATH}`);
 });
+
